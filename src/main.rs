@@ -54,7 +54,6 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: Socke
     let peers = peer_map.lock().unwrap().clone();
     broadcast_msg(peer_map.clone(), Message::Text(format!(r#"{{"type":"users", "count":{}}}"#, peers.len())));
     drop(peers);
-    //broadcast_user_count(peer_map.clone(), None);
 
     let (outgoing, incoming) = ws_stream.split();
 
@@ -62,23 +61,40 @@ async fn handle_connection(peer_map: PeerMap, raw_stream: TcpStream, addr: Socke
         match msg {
             Message::Text(_) => {
                 //println!("Received a message from {}: {}", addr, msg.to_text().unwrap());
-                let peers = peer_map.lock().unwrap();
 
                 let mut temp_image = image.lock().expect("Unable to lock image");
 
                 let response = handle_msg(msg, *temp_image);
                 if let Some(new_image) = response.1 {
                     *temp_image = new_image;
+                    let data = format!(
+                        r#"{{
+                            "type": "state",
+                            "picture": {:?}
+                        }}"#, temp_image);
+                    
+                    broadcast_msg(peer_map.clone(), Message::Text(data));
                 }
                 drop(temp_image);
 
                 if let Some(msg) = response.0 {
                     //send response
 
+                    let peers = peer_map.lock().unwrap();
                     if let Some(tx) = peers.get(&addr) {
                         //TODO: Catch Error
-                        tx.unbounded_send(msg).expect("Failed to send Message");
+                        //tx.unbounded_send(msg).expect("Failed to send Message");
+                        match tx.unbounded_send(msg) {
+                            Result::Ok(result) => {
+                                //println!("message sent");
+                                result
+                            },
+                            Result::Err(err) => {
+                                eprintln!("{:?}", err);
+                            }
+                        }
                     }
+                    drop(peers);
                 }
             }
             Message::Close(_) => {
@@ -133,7 +149,7 @@ fn broadcast_msg(peer_map: PeerMap, msg: Message) {
     }
 }
 
-fn broadcast_msg_exclude(peer_map: PeerMap, addr: SocketAddr, msg: Message) {
+/*fn broadcast_msg_exclude(peer_map: PeerMap, addr: SocketAddr, msg: Message) {
     let mut has_removed_addr = true;
     // Keep track of whether or not this function call has removed an addr from peers
     while has_removed_addr {
@@ -161,7 +177,7 @@ fn broadcast_msg_exclude(peer_map: PeerMap, addr: SocketAddr, msg: Message) {
             }
         }
     }
-}
+}*/
 
 // handle_msg: receive tungstenite::Message, process message and 
 fn handle_msg (msg: Message, image: [u8; 3600]) -> (Option<Message>, Option<[u8; 3600]>) {
